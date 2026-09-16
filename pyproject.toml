@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lpnrecog"
+version = "0.1.0"
+description = "License plate recognition: SAM3 mask segmentation -> perspective rectification -> OCR"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26,<2",
+    "opencv-python-headless",
+    "pillow",
+    "paddleocr",
+    "paddlepaddle",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+lpnrecog = "lpnrecog.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: tests that load large models or run OCR"]
