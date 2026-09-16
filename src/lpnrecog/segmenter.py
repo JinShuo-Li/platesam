@@ -24,7 +24,7 @@ DEFAULT_VEHICLE_PROMPTS: tuple[str, ...] = ("car",)
 
 #: Text prompts whose text-encoder output is computed once at load time and
 #: reused for every image. Everything else goes through the normal text path.
-CACHED_PROMPTS: tuple[str, ...] = ("license plate",)
+CACHED_PROMPTS: tuple[str, ...] = DEFAULT_PROMPTS + DEFAULT_VEHICLE_PROMPTS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CKPT = _REPO_ROOT / "vendor" / "sam3" / "weights" / "master" / "sam3.pt"
@@ -139,18 +139,21 @@ class PlateSegmenter:
         prompts: Optional[Sequence[str]] = None,
     ) -> List[PlateDetection]:
         """Detect license plates; returns merged, filtered detections."""
-        pil_image = _to_pil(image)
+        self.load()
         prompts = tuple(prompts) if prompts else self.prompts
 
-        with bf16_autocast(self.device, enabled=self.use_autocast):
+        with torch.inference_mode(), bf16_autocast(
+            self.device, enabled=self.use_autocast
+        ):
+            pil_image = _to_pil(image)
             detections = self._segment_pass(pil_image, prompts)
             detections = [d for d in detections if self._keep(d)]
             if not detections and self.fallback_zoom:
                 detections = self._fallback_zoom(pil_image, prompts)
 
-        detections = self._merge(detections)
-        detections.sort(key=lambda d: d.score, reverse=True)
-        return detections
+            detections = self._merge(detections)
+            detections.sort(key=lambda d: d.score, reverse=True)
+            return detections
 
     def _segment_pass(
         self, pil_image: Image.Image, prompts: Sequence[str]
@@ -242,7 +245,7 @@ class PlateSegmenter:
         boxes: List[tuple[float, float, float, float]] = []
         for prompt in self.vehicle_prompts:
             self.processor.reset_all_prompts(state)
-            state = self.processor.set_text_prompt(prompt=prompt, state=state)
+            state = self._set_text_prompt(state, prompt)
             scores = state["scores"].float().cpu().tolist()
             for score, box in zip(scores, state["boxes"].float().cpu().tolist()):
                 if score < self.confidence_threshold:

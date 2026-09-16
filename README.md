@@ -51,8 +51,9 @@ The result is flagged `"valid": false` in the JSON.
   text prompts alone.
 - **Multi-prompt merge**: several English prompt candidates are run and merged by mask IoU
   (`license plate`, `number plate`, `vehicle registration plate`, `car plate`).
-- **Fixed-prompt text cache**: the `license plate` text embedding is computed once at load and
-  reused for every image — see [Fixed-prompt text cache](#fixed-prompt-text-cache).
+- **Fixed-prompt text cache**: all fixed pipeline prompts (the four plate candidates plus
+  `car`) are encoded once at load and reused for every image — see
+  [Fixed-prompt text cache](#fixed-prompt-text-cache).
 - **Coarse-to-fine fallback**: if the full-frame pass finds nothing, vehicles are located with
   the `car` prompt, cropped with margin, upscaled, and re-run; last resort is the bottom half.
 - **Geometry-aware rectification**: contour → quad (`approxPolyDP`, `minAreaRect` fallback) →
@@ -78,7 +79,7 @@ The result is flagged `"valid": false` in the JSON.
 │   └── weights/master/      # sam3.pt checkpoint (gitignored, download separately)
 ├── assets/samples/          # demo images (Wikimedia Commons, see Licensing)
 ├── docs/                    # README figures
-├── scripts/                 # weight download + text-cache benchmark
+├── scripts/                 # weight download, cache benchmark, XPU profiler
 └── tests/                   # pytest unit tests
 ```
 
@@ -257,27 +258,52 @@ python -m lpnrecog -i INPUT [-o OUTPUT] [options]
 
 #### Fixed-prompt text cache
 
-The prompt `"license plate"` never changes between images, so its SAM 3 text-encoder output
-(`language_features`, `language_mask`, `language_embeds`) is computed **once** in
+Every prompt the pipeline can issue is a fixed string, so their SAM 3 text-encoder outputs
+(`language_features`, `language_mask`, `language_embeds`) are computed **once** in
 `PlateSegmenter.load()` via the existing `backbone.forward_text(...)` and reused by every
-grounding pass. The generic path is untouched: any other prompt (e.g. `number plate`, `car`)
-still runs the text encoder through `Sam3Processor.set_text_prompt`.
-`segmenter.use_text_cache = False` restores the original behavior.
+grounding pass — including the `car` prompt used by the zoom fallback:
 
-Measured on the XPU laptop (1008² input, bf16, single `"license plate"` prompt):
+`license plate` · `number plate` · `vehicle registration plate` · `car plate` · `car`
 
-| | value |
-| --- | --- |
-| one text-encoder pass (cost avoided per inference) | ~63 ms |
-| steady-state inference, uncached | ~1.78–1.83 s |
-| steady-state inference, cached | ~1.73–1.77 s |
-| speedup | 1.03–1.05× |
-| detection outputs | bit-identical (box/score max \\|Δ\\| = 0, mask IoU = 1.0) |
-| peak XPU memory | unchanged (~3.97 GB) |
+The full `segment()` path runs under `torch.inference_mode()` (matching the original
+`Sam3Processor.set_text_prompt()`), so cached grounding stays inference-only. The generic path
+is untouched: any custom prompt still runs the text encoder through
+`Sam3Processor.set_text_prompt`, and `segmenter.use_text_cache = False` restores the original
+behavior. Caching all five prompts costs ~0.3 s once at load (5 × ~60 ms) and removes ~60 ms
+per prompt from every inference (~0.25 s per default 4-prompt image).
 
-The gain is bounded by the image encoder that dominates full-frame inference; cached tensors
-(a few KB) also do not increase the measured peak memory. Reproduce with
-`python scripts/benchmark_text_cache.py --runs 5`.
+Correctness: cached vs uncached outputs match exactly on all three sample images (detection
+count, boxes, scores, mask IoU = 1.0, OCR text/scores), and a full result dump — including
+mask SHA-256 hashes — of the previous revision matches bit-for-bit.
+
+#### Stage-level XPU profile
+
+Measured with `scripts/profile_xpu_pipeline.py --runs 5` on an Intel XPU laptop
+(`torch 2.14.0+xpu`, bf16 autocast, 1008² input, `guangdong_plate.jpg`). Accelerator stages
+are timed with `torch.xpu.synchronize()`; values are medians over 5 runs after warmup.
+
+| stage | single prompt | default 4 prompts | share (default) |
+| --- | ---: | ---: | ---: |
+| image load (`imread`) | 3.9 ms | 3.7 ms | 0.1% |
+| preprocess (to PIL) | 5.4 ms | 5.4 ms | 0.2% |
+| **set_image (transform + ViT)** | **1241 ms** | **1212 ms** | **46.0%** |
+| grounding: `license plate` | 234 ms | 236 ms | 9.0% |
+| grounding: `number plate` | — | 229 ms | 8.7% |
+| grounding: `vehicle registration plate` | — | 224 ms | 8.5% |
+| grounding: `car plate` | — | 228 ms | 8.7% |
+| mask upsample (`interpolate`) | 0.2 ms | 0.9 ms | 0.0% |
+| XPU→CPU extract (scores/boxes/masks) | 2.9 ms | 11.7 ms | 0.4% |
+| filter (shape) | 1.2 ms | 3.8 ms | 0.1% |
+| NMS merge (mask IoU) | 0.0 ms | 3.1 ms | 0.1% |
+| **segment total** | **1475 ms** | **2159 ms** | **82.0%** |
+| rectify | 2.8 ms | 2.3 ms | 0.1% |
+| OCR (PaddleOCR, CPU) | 420 ms | 415 ms | 15.8% |
+| **pipeline total** | **1936 ms** | **2633 ms** | 100% |
+
+The remaining bottleneck is the 1008² vision backbone (~1.2 s) plus one ~230 ms grounding
+pass per prompt. Everything after the masks leave the XPU — normalization, mask upsampling,
+D2H transfer, shape filtering, mask-IoU NMS, rectification — is below 1% each, so further work
+has to target the image encoder or prompt batching; this round changes neither.
 
 ### 2. Rectification (`rectify.py`)
 
@@ -329,6 +355,9 @@ pytest -m slow          # PaddleOCR smoke test on a synthetic plate (downloads O
 
 # fixed-prompt cache: output equivalence + latency + peak XPU memory
 python scripts/benchmark_text_cache.py --runs 5
+
+# stage-level XPU profile (single + default prompts) with cached/uncached verification
+python scripts/profile_xpu_pipeline.py --runs 5
 ```
 
 ## Known limitations
