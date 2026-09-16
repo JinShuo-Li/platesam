@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
 import numpy as np
+import torch
 from PIL import Image
 
 from .device import bf16_autocast, empty_cache, get_device
@@ -20,6 +21,10 @@ DEFAULT_PROMPTS: tuple[str, ...] = (
 )
 
 DEFAULT_VEHICLE_PROMPTS: tuple[str, ...] = ("car",)
+
+#: Text prompts whose text-encoder output is computed once at load time and
+#: reused for every image. Everything else goes through the normal text path.
+CACHED_PROMPTS: tuple[str, ...] = ("license plate",)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CKPT = _REPO_ROOT / "vendor" / "sam3" / "weights" / "master" / "sam3.pt"
@@ -79,8 +84,11 @@ class PlateSegmenter:
         self.zoom_max_side = zoom_max_side
         self.zoom_max_regions = zoom_max_regions
 
+        self.use_text_cache = True
+
         self._model = None
         self._processor = None
+        self._text_cache: dict[str, dict[str, torch.Tensor]] = {}
 
     # ------------------------------------------------------------------ setup
     def load(self) -> "PlateSegmenter":
@@ -104,8 +112,20 @@ class PlateSegmenter:
         self._processor = Sam3Processor(
             self._model, confidence_threshold=self.confidence_threshold
         )
+        for prompt in CACHED_PROMPTS:
+            self._cache_text_prompt(prompt)
         empty_cache(self.device)
         return self
+
+    def _cache_text_prompt(self, prompt: str) -> None:
+        """Run the text encoder once and keep all outputs for reuse."""
+        with torch.inference_mode(), bf16_autocast(
+            self.device, enabled=self.use_autocast
+        ):
+            text_outputs = self._model.backbone.forward_text(
+                [prompt], device=self.device
+            )
+        self._text_cache[prompt] = text_outputs
 
     @property
     def processor(self):
@@ -140,9 +160,19 @@ class PlateSegmenter:
         detections: List[PlateDetection] = []
         for prompt in prompts:
             self.processor.reset_all_prompts(state)
-            state = self.processor.set_text_prompt(prompt=prompt, state=state)
+            state = self._set_text_prompt(state, prompt)
             detections.extend(self._extract(state, prompt))
         return detections
+
+    def _set_text_prompt(self, state, prompt: str):
+        """Like ``Sam3Processor.set_text_prompt`` but reuse cached text features."""
+        cached = self._text_cache.get(prompt)
+        if not self.use_text_cache or cached is None:
+            return self.processor.set_text_prompt(prompt=prompt, state=state)
+        state["backbone_out"].update(cached)
+        if "geometric_prompt" not in state:
+            state["geometric_prompt"] = self.processor.model._get_dummy_prompt()
+        return self.processor._forward_grounding(state)
 
     def _fallback_zoom(
         self, pil_image: Image.Image, prompts: Sequence[str]

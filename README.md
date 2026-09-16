@@ -51,6 +51,8 @@ The result is flagged `"valid": false` in the JSON.
   text prompts alone.
 - **Multi-prompt merge**: several English prompt candidates are run and merged by mask IoU
   (`license plate`, `number plate`, `vehicle registration plate`, `car plate`).
+- **Fixed-prompt text cache**: the `license plate` text embedding is computed once at load and
+  reused for every image — see [Fixed-prompt text cache](#fixed-prompt-text-cache).
 - **Coarse-to-fine fallback**: if the full-frame pass finds nothing, vehicles are located with
   the `car` prompt, cropped with margin, upscaled, and re-run; last resort is the bottom half.
 - **Geometry-aware rectification**: contour → quad (`approxPolyDP`, `minAreaRect` fallback) →
@@ -76,7 +78,7 @@ The result is flagged `"valid": false` in the JSON.
 │   └── weights/master/      # sam3.pt checkpoint (gitignored, download separately)
 ├── assets/samples/          # demo images (Wikimedia Commons, see Licensing)
 ├── docs/                    # README figures
-├── scripts/                 # download_sam3_weights.sh
+├── scripts/                 # weight download + text-cache benchmark
 └── tests/                   # pytest unit tests
 ```
 
@@ -253,6 +255,30 @@ python -m lpnrecog -i INPUT [-o OUTPUT] [options]
   the `car` prompt locates vehicles, each is cropped with 25% margin, upscaled to 1008 px, and
   re-run through the plate prompts; masks are mapped back to full-image coordinates.
 
+#### Fixed-prompt text cache
+
+The prompt `"license plate"` never changes between images, so its SAM 3 text-encoder output
+(`language_features`, `language_mask`, `language_embeds`) is computed **once** in
+`PlateSegmenter.load()` via the existing `backbone.forward_text(...)` and reused by every
+grounding pass. The generic path is untouched: any other prompt (e.g. `number plate`, `car`)
+still runs the text encoder through `Sam3Processor.set_text_prompt`.
+`segmenter.use_text_cache = False` restores the original behavior.
+
+Measured on the XPU laptop (1008² input, bf16, single `"license plate"` prompt):
+
+| | value |
+| --- | --- |
+| one text-encoder pass (cost avoided per inference) | ~63 ms |
+| steady-state inference, uncached | ~1.78–1.83 s |
+| steady-state inference, cached | ~1.73–1.77 s |
+| speedup | 1.03–1.05× |
+| detection outputs | bit-identical (box/score max \\|Δ\\| = 0, mask IoU = 1.0) |
+| peak XPU memory | unchanged (~3.97 GB) |
+
+The gain is bounded by the image encoder that dominates full-frame inference; cached tensors
+(a few KB) also do not increase the measured peak memory. Reproduce with
+`python scripts/benchmark_text_cache.py --runs 5`.
+
 ### 2. Rectification (`rectify.py`)
 
 - Largest contour of the mask → `approxPolyDP`, falling back to `minAreaRect`.
@@ -300,6 +326,9 @@ notebook's CUDA bf16); plain fp32 global attention at 1008² input would need ~1
 ```bash
 pytest -m "not slow"    # rectification geometry + text post-processing (no models needed)
 pytest -m slow          # PaddleOCR smoke test on a synthetic plate (downloads OCR models)
+
+# fixed-prompt cache: output equivalence + latency + peak XPU memory
+python scripts/benchmark_text_cache.py --runs 5
 ```
 
 ## Known limitations
