@@ -83,42 +83,196 @@ The result is flagged `"valid": false` in the JSON.
 └── tests/                   # pytest unit tests
 ```
 
-## Requirements
+## Environment Setup
 
-| Item | Tested / required |
+The following is the verified dependency environment for this project, including core dependencies and the full dependency list.
+
+### Core Environment
+
+| Component | Version |
 | --- | --- |
-| OS | Linux (developed on WSL2, kernel 6.18) |
-| Hardware | Intel XPU (iGPU/dGPU with Level Zero); CUDA GPU or CPU also work |
-| Python | 3.10–3.12 (tested on 3.12) |
-| PyTorch | 2.14.0+xpu + torchvision 0.29.0+xpu (CUDA/CPU builds also fine) |
-| Paddle | paddlepaddle 3.3.1 + paddleocr 3.7.0 (CPU) |
-| Disk | ~10 GB (3.4 GB checkpoint + models + env) |
-| Memory | ≥8 GB RAM; XPU inference peaks at ~4 GB |
+| Python | 3.10+ recommended |
+| PyTorch | 2.14.0+xpu |
+| TorchVision | 0.29.0+xpu |
+| PaddlePaddle | 3.3.1 |
+| PaddleOCR | 3.7.0 |
+| PaddleX | 3.7.2 |
+| NumPy | 1.26.4 |
 
-## Installation
+> Note: `torch` and `torchvision` are **XPU builds** (Intel GPU acceleration), which require Intel oneAPI runtimes (e.g., `intel-sycl-rt`, `intel-openmp`, `oneccl`).
 
-The reference environment is a conda env named `sam3`. To rebuild it from scratch:
+### Full Dependency List
 
-```bash
-conda create -n sam3 python=3.12 -y
-conda activate sam3
-
-# 1) PyTorch for Intel XPU (or use the official CUDA/CPU index for other hardware)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
-
-# 2) Vendored SAM 3 and this project (editable, no dependency resolution side effects)
-pip install -e vendor/sam3 --no-deps
-pip install -e . --no-deps
-
-# 3) Runtime dependencies
-pip install "numpy<2" opencv-python-headless pillow \
-            paddlepaddle paddleocr \
-            einops pycocotools psutil pytest
+```
+aiohappyeyeballs       2.7.1
+aiohttp                3.14.3
+aiosignal              1.4.0
+aistudio_sdk           0.3.9
+annotated-types        0.8.0
+anyio                  4.15.1
+attrs                  26.1.0
+bce-python-sdk         0.9.79
+certifi                2026.7.22
+cffi                   2.1.1
+chardet                7.6.0
+charset-normalizer     3.5.1
+click                  8.5.0
+colorlog               6.12.0
+crc32c                 2.9.post0
+cryptography           50.0.1
+dpcpp-cpp-rt            2026.1.0
+einops                 0.8.2
+filelock               3.32.3
+frozenlist              1.8.0
+fsspec                 2026.7.0
+ftfy                   6.1.1
+future                 1.0.0
+h11                    0.16.0
+hf-xet                 1.6.0
+httpcore               1.0.9
+httpx                  0.28.1
+huggingface_hub        1.32.0
+idna                   3.20
+imagesize              2.0.1
+impi-rt                2021.18.1
+iniconfig              2.3.0
+intel-cmplr-lib-rt     2026.1.0
+intel-cmplr-lib-ur     2026.1.0
+intel-cmplr-lic-rt     2026.1.0
+intel-opencl-rt        2026.1.0
+intel-openmp           2026.1.0
+intel-pti              1.0.1
+intel-sycl-rt          2026.1.0
+iopath                 0.1.10
+Jinja2                 3.1.6
+lpnrecog               0.1.0       /home/kkl/platesam
+MarkupSafe              3.0.3
+mkl                    2026.1.0
+modelscope             1.40.1
+modelscope-hub         0.4.3
+mpmath                 1.3.0
+multidict              6.8.0
+networkx               3.6.1
+numpy                  1.26.4
+oneccl                 2022.1.1
+oneccl-devel           2022.1.1
+onemkl-license         2026.1.0
+onemkl-sycl-blas       2026.1.0
+onemkl-sycl-dft        2026.1.0
+onemkl-sycl-lapack     2026.1.0
+onemkl-sycl-rng        2026.1.0
+onemkl-sycl-sparse     2026.1.0
+opencv-contrib-python  4.10.0.84
+opencv-python-headless 4.11.0.86
+opt-einsum             3.3.0
+packaging              26.3
+paddleocr              3.7.0
+paddlepaddle           3.3.1
+paddlex                3.7.2
+pandas                 3.0.6
+pillow                 12.3.0
+pip                    26.2.1
+pluggy                 1.6.0
+portalocker            4.3.2
+prettytable            3.18.0
+propcache              0.5.4
+protobuf               7.36.2
+psutil                 7.2.2
+py-cpuinfo             9.0.0
+pyclipper              1.4.0
+pycocotools            2.0.11
+pycparser              3.0
+pycryptodome            3.23.0
+pydantic               2.13.5
+pydantic_core          2.46.5
+pyelftools             0.32
+Pygments               2.21.0
+pypdfium2              5.13.0
+pytest                 9.1.1
+python-bidi            0.6.11
+python-dateutil        2.9.0.post0
+PyYAML                 6.0.2
+pyzes                  0.1.2
+regex                  2026.9.10
+requests               2.34.2
+ruamel.yaml            0.19.1
+safetensors            0.8.0
+sam3                   0.1.0       /home/kkl/platesam/vendor/sam3
+setuptools             83.0.0
+shapely                2.1.2
+six                    1.17.0
+sympy                  1.14.0
+tbb                    2023.1.0
+tcmlib                 1.5.0
+timm                   1.0.29
+torch                  2.14.0+xpu
+torchvision            0.29.0+xpu
+tqdm                   4.70.1
+triton-xpu             3.8.0
+typing_extensions      4.16.0
+typing-inspection      0.4.4
+ujson                  6.0.0
+umf                    1.1.0
+urllib3                2.8.0
+wcwidth                0.8.4
+wheel                  0.47.0
+yarl                   1.25.1
 ```
 
-> **Note:** `paddleocr` pulls `opencv-contrib-python`; keep `numpy<2` (SAM 3 requires it).
-> If `import sam3` fails with `ModuleNotFoundError: pkg_resources`, you are running the
-> unpatched upstream code — this repo already replaced it with `importlib.resources`.
+### Local Packages
+
+Two packages in the list are installed from local paths. After cloning the repository, install them from their corresponding directories:
+
+| Package | Version | Path |
+| --- | --- | --- |
+| lpnrecog | 0.1.0 | `/home/kkl/platesam` |
+| sam3 | 0.1.0 | `/home/kkl/platesam/vendor/sam3` |
+
+Installation example:
+
+```bash
+pip install -e .
+pip install -e vendor/sam3
+```
+
+### Installation
+
+#### Option 1: Export and Install from Requirements (Recommended)
+
+Export the dependency list from a verified environment:
+
+```bash
+pip freeze > requirements.txt
+```
+
+Install in a new environment:
+
+```bash
+pip install -r requirements.txt
+```
+
+#### Option 2: Manually Install Core Dependencies
+
+```bash
+pip install torch==2.14.0+xpu torchvision==0.29.0+xpu --index-url https://download.pytorch.org/whl/xpu
+pip install paddlepaddle==3.3.1 paddleocr==3.7.0 paddlex==3.7.2
+pip install numpy==1.26.4 opencv-contrib-python==4.10.0.84 opencv-python-headless==4.11.0.86
+pip install -e .
+pip install -e vendor/sam3
+```
+
+### Verification
+
+After installation, run the following commands to confirm the key dependency versions:
+
+```bash
+python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__)"
+python -c "import paddle; print(paddle.__version__)"
+python -c "import paddleocr, paddlex; print(paddleocr.__version__, paddlex.__version__)"
+python -c "import numpy, cv2; print(numpy.__version__, cv2.__version__)"
+```
+
+If the output matches the versions listed above, the environment setup is complete.
 
 ## Model weights
 
