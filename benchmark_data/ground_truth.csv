@@ -1,0 +1,51 @@
+image,plate,category,plate_type,province,prefix,label_source,verified,notes
+001.jpg,鲁RPP800,normal,blue,鲁,鲁R,official_annotation,yes,clear near-frontal image
+002.jpg,赣EV2997,normal,blue,赣,赣E,official_annotation,yes,clear near-frontal image
+003.jpg,京ADH3906,normal,new_energy,京,京A,official_annotation,yes,clear near-frontal image; genuine 8-character new-energy plate
+004.jpg,津AF15488,normal,new_energy,津,津A,official_annotation,yes,clear near-frontal image; genuine 8-character new-energy plate
+005.jpg,京AG6156,normal,blue,京,京A,filename_annotation,yes,clear near-frontal image; project filename label visually cross-checked
+006.jpg,冀A85A68,normal,blue,冀,冀A,filename_annotation,yes,clear near-frontal image; project filename label visually cross-checked
+007.jpg,辽PH0007,normal,blue,辽,辽P,filename_annotation,yes,clear near-frontal image; project filename label visually cross-checked
+008.jpg,苏A61L77,normal,blue,苏,苏A,filename_annotation,yes,clear near-frontal image; project filename label visually cross-checked
+009.jpg,鲁JRW350,normal,blue,鲁,鲁J,filename_annotation,yes,clear near-frontal image; project filename label visually cross-checked
+010.jpg,云A77C66,normal,blue,云,云A,filename_annotation,yes,clear near-frontal image; project filename label visually cross-checked
+011.jpg,京Q5LH23,angle,blue,京,京Q,official_annotation,yes,primary difficulty: perspective/oblique view
+012.jpg,苏AW8D96,angle,blue,苏,苏A,official_annotation,yes,primary difficulty: perspective/oblique view
+013.jpg,粤BF47229,angle,new_energy,粤,粤B,official_annotation,yes,primary difficulty: perspective/oblique view; genuine 8-character new-energy plate
+014.jpg,浙BF10006,angle,new_energy,浙,浙B,official_annotation,yes,primary difficulty: perspective/oblique view; genuine 8-character new-energy plate
+015.jpg,渝BE7773,angle,blue,渝,渝B,filename_annotation,yes,primary difficulty: perspective/oblique view; project filename label visually cross-checked
+016.jpg,辽CL8765,angle,blue,辽,辽C,filename_annotation,yes,primary difficulty: perspective/oblique view; project filename label visually cross-checked
+018.jpg,粤APF666,angle,blue,粤,粤A,filename_annotation,yes,primary difficulty: perspective/oblique view; project filename label visually cross-checked
+019.jpg,苏A2YT87,angle,blue,苏,苏A,official_annotation,yes,primary difficulty: strong perspective/oblique view; official CCPD filename annotation; clean replacement for obscured sample
+020.jpg,陕KSB250,angle,blue,陕,陕K,filename_annotation,yes,primary difficulty: perspective/oblique view; project filename label visually cross-checked
+021.jpg,云PNN111,small,blue,云,云P,official_annotation,yes,primary difficulty: small plate in full image
+023.jpg,宁AF17555,small,new_energy,宁,宁A,official_annotation,yes,primary difficulty: small plate in full image; genuine 8-character new-energy plate
+024.jpg,沪AGH092,small,blue,沪,沪A,filename_annotation,yes,primary difficulty: small plate in full image; project filename label visually cross-checked
+025.jpg,黑A1R272,small,blue,黑,黑A,filename_annotation,yes,primary difficulty: small plate in full image; project filename label visually cross-checked
+026.jpg,浙A26M71,small,blue,浙,浙A,filename_annotation,yes,primary difficulty: small plate in full image; project filename label visually cross-checked
+028.jpg,湘AT3597,small,blue,湘,湘A,filename_annotation,yes,primary difficulty: small plate in full image; project filename label visually cross-checked
+030.jpg,苏CFY773,small,blue,苏,苏C,official_annotation,yes,primary difficulty: small plate in full image
+032.jpg,苏FV937R,blur,blue,苏,苏F,official_annotation,yes,primary difficulty: blur/low resolution/compression
+033.jpg,鄂JF20988,blur,new_energy,鄂,鄂J,official_annotation,yes,primary difficulty: blur/low resolution/compression; genuine 8-character new-energy plate
+034.jpg,豫Q13852,blur,blue,豫,豫Q,official_annotation,yes,primary difficulty: blur/low resolution/compression
+035.jpg,辽ASB945,blur,blue,辽,辽A,filename_annotation,yes,primary difficulty: blur/low resolution/compression; project filename label visually cross-checked
+036.jpg,琼A31620,blur,blue,琼,琼A,filename_annotation,yes,primary difficulty: blur/low resolution/compression; project filename label visually cross-checked
+038.jpg,粤B972HL,blur,blue,粤,粤B,filename_annotation,yes,primary difficulty: blur/low resolution/compression; project filename label visually cross-checked
+039.jpg,琼ALX570,blur,blue,琼,琼A,filename_annotation,yes,primary difficulty: blur/low resolution/compression; project filename label visually cross-checked
+040.jpg,云BC6208,blur,blue,云,云B,filename_annotation,yes,primary difficulty: blur/low resolution/compression; project filename label visually cross-checked
+041.jpg,皖A178P3,lighting,blue,皖,皖A,official_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure"
+042.jpg,皖DJ125J,lighting,blue,皖,皖D,official_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure"
+043.jpg,豫AD06809,lighting,new_energy,豫,豫A,official_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; genuine 8-character new-energy plate"
+044.jpg,鲁BF05876,lighting,new_energy,鲁,鲁B,official_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; genuine 8-character new-energy plate"
+045.jpg,渝BXB092,lighting,blue,渝,渝B,filename_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; project filename label visually cross-checked"
+046.jpg,黑AXV105,lighting,blue,黑,黑A,filename_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; project filename label visually cross-checked"
+047.jpg,闽DSB222,lighting,blue,闽,闽D,filename_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; project filename label visually cross-checked"
+048.jpg,皖AES132,lighting,blue,皖,皖A,official_annotation,yes,primary difficulty: natural dark/uneven lighting; official CCPD filename annotation; clean replacement for media-overlay sample
+049.jpg,川UD8765,lighting,blue,川,川U,filename_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; project filename label visually cross-checked"
+050.jpg,川AGU052,lighting,blue,川,川A,filename_annotation,yes,"primary difficulty: night, glare, shadow, or uneven exposure; project filename label visually cross-checked"
+051.jpg,沪CVZ313,angle,blue,沪,沪C,official_annotation,yes,pronounced perspective distortion; official filename annotation and official bbox; manually checked legible
+052.jpg,赣E8P235,small,blue,赣,赣E,official_annotation,yes,distant vehicle; official filename annotation and official bbox; manually checked legible
+053.jpg,鲁Q907TA,small,blue,鲁,鲁Q,official_annotation,yes,distant vehicle; official filename annotation and official bbox; manually checked legible
+054.jpg,浙D3B829,small,blue,浙,浙D,official_annotation,yes,distant vehicle; official filename annotation and official bbox; manually checked legible
+055.jpg,鲁F0351A,blur,blue,鲁,鲁F,official_annotation,yes,moderate blur and low contrast; official filename annotation and official bbox; manually checked legible
+056.jpg,湘G8QX78,blur,blue,湘,湘G,official_annotation,yes,moderate blur; official filename annotation and official bbox; manually checked legible
