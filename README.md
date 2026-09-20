@@ -82,7 +82,7 @@ The result is flagged `"valid": false` in the JSON.
 │   └── weights/master/      # sam3.pt checkpoint (gitignored, download separately)
 ├── assets/samples/          # demo images (Wikimedia Commons, see Licensing)
 ├── docs/                    # README figures
-├── scripts/                 # weight download, cache/compile benchmarks, XPU profiler
+├── scripts/                 # weight download, benchmarks/profiler, evaluator
 └── tests/                   # pytest unit tests
 ```
 
@@ -376,6 +376,47 @@ Compiler notes (torch 2.14.0+xpu, triton-xpu 3.8.0):
 - Text is normalized (NFKC, upper-case, confusion map) and validated against Chinese plate
   patterns (standard 7-char, new-energy 8-char).
 
+## Benchmark evaluation
+
+`scripts/evaluate_benchmark.py` runs the full pipeline over the frozen
+[`benchmark_data`](benchmark_data/README.md) v1.0 set (50 images: 10 each of normal / angle /
+small / blur / lighting; 42 blue + 8 new-energy plates) and scores recognition against
+`ground_truth.csv`. Default settings on the XPU laptop:
+
+| metric | result |
+| --- | ---: |
+| detected (≥1 plate) | 50/50 (100%) |
+| exact plate match (top-1 / any) | 31/50 (62%) |
+| valid plate format | 33/50 (66%) |
+| mean character accuracy | 81.2% |
+| latency | median 2.44 s, total 145 s |
+
+| category | exact | | plate type | exact |
+| --- | ---: | --- | --- | ---: |
+| normal | 8/10 | | blue | 25/42 |
+| angle | 8/10 | | new-energy | 6/8 |
+| small | 4/10 | | | |
+| blur | 6/10 | | | |
+| lighting | 5/10 | | | |
+
+The dominant failure mode is the leading province/prefix glyphs: 13 of the 19 misses lose,
+misread or garble them (`冀A85A68`→`冀`, `苏A61L77`→`A61L77`, `鲁BF05876`→`F05876`, …), 4 images
+produce an empty OCR string, one misreads `豫AD06809` as `皖AD06809`, and one confuses `1`/`L`.
+SAM3 finds a plate in every image, so the remaining errors sit in rectification/OCR, not
+detection.
+
+Eager vs compiled (`--compare`): recognition verdict identical on all 50 images, top-1 text
+identical on 49/50 (the one difference is wrong in both runs, `PF` vs `号`), detection count
+identical on 49/50, mask IoU median 0.9996 (min 0.972, 48/49 ≥ 0.99) and max text-score drift
+0.019. The compiled vision backbone does not change which plates are read correctly.
+
+Reproduce:
+
+```bash
+python scripts/evaluate_benchmark.py                 # eager accuracy report
+python scripts/evaluate_benchmark.py --compare       # + eager/compiled agreement
+```
+
 ## XPU port (changes vs upstream SAM 3)
 
 | File | Change |
@@ -416,6 +457,9 @@ python scripts/profile_xpu_pipeline.py --runs 5
 # eager vs torch.compile: interleaved latency + equivalence (vision/detections/OCR)
 python scripts/benchmark_compile.py --runs 3 --cycles 5
 python scripts/benchmark_compile.py --verify-only assets/samples/*.jpg
+
+# accuracy on the frozen benchmark_data v1.0 set (+ eager/compiled agreement)
+python scripts/evaluate_benchmark.py --compare
 ```
 
 ## Known limitations
