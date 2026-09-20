@@ -49,6 +49,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-viz", action="store_true", help="skip visualization output")
     parser.add_argument("--no-crops", action="store_true", help="skip saving plate crops")
     parser.add_argument("--json", default=None, help="results JSON path (default: <output>/results.json)")
+    parser.add_argument(
+        "--compile-vision",
+        action="store_true",
+        help="torch.compile the SAM3 vision backbone (first run pays compilation)",
+    )
+    parser.add_argument(
+        "--compile-vision-mode", default="default", help="torch.compile mode"
+    )
+    parser.add_argument(
+        "--compile-vision-target",
+        default="trunk",
+        choices=("trunk", "vision_backbone", "forward_image"),
+        help="vision module to compile (default: trunk)",
+    )
     return parser
 
 
@@ -87,6 +101,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         device=device,
         prompts=tuple(args.prompt) if args.prompt else DEFAULT_PROMPTS,
         confidence_threshold=args.conf,
+        compile_vision=args.compile_vision,
+        compile_vision_mode=args.compile_vision_mode,
+        compile_vision_target=args.compile_vision_target,
     )
     pipeline = PlateRecognitionPipeline(
         segmenter=segmenter, out_size=_parse_size(args.plate_size)

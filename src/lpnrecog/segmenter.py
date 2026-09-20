@@ -67,6 +67,9 @@ class PlateSegmenter:
         zoom_margin: float = 0.25,
         zoom_max_side: int = 1008,
         zoom_max_regions: int = 4,
+        compile_vision: bool = False,
+        compile_vision_mode: str = "default",
+        compile_vision_target: str = "trunk",
     ) -> None:
         self.checkpoint = Path(checkpoint) if checkpoint else _default_checkpoint()
         self.bpe_path = Path(bpe_path) if bpe_path else _DEFAULT_BPE
@@ -83,6 +86,9 @@ class PlateSegmenter:
         self.zoom_margin = zoom_margin
         self.zoom_max_side = zoom_max_side
         self.zoom_max_regions = zoom_max_regions
+        self.compile_vision = compile_vision
+        self.compile_vision_mode = compile_vision_mode
+        self.compile_vision_target = compile_vision_target
 
         self.use_text_cache = True
 
@@ -114,8 +120,32 @@ class PlateSegmenter:
         )
         for prompt in CACHED_PROMPTS:
             self._cache_text_prompt(prompt)
+        if self.compile_vision:
+            self._compile_vision()
         empty_cache(self.device)
         return self
+
+    def _compile_vision(self) -> None:
+        """Wrap the vision backbone in ``torch.compile`` (lazy: first call compiles)."""
+        backbone = self._model.backbone
+        targets = {
+            "trunk": (backbone.vision_backbone.trunk, "forward"),
+            "vision_backbone": (backbone.vision_backbone, "forward"),
+            "forward_image": (backbone, "forward_image"),
+        }
+        if self.compile_vision_target not in targets:
+            raise ValueError(
+                f"Unknown compile_vision_target {self.compile_vision_target!r}; "
+                f"expected one of {sorted(targets)}"
+            )
+        target, attr = targets[self.compile_vision_target]
+        compiled = torch.compile(
+            getattr(target, attr),
+            mode=self.compile_vision_mode,
+            dynamic=False,
+            fullgraph=True,
+        )
+        setattr(target, attr, compiled)
 
     def _cache_text_prompt(self, prompt: str) -> None:
         """Run the text encoder once and keep all outputs for reuse."""

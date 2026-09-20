@@ -54,6 +54,9 @@ The result is flagged `"valid": false` in the JSON.
 - **Fixed-prompt text cache**: all fixed pipeline prompts (the four plate candidates plus
   `car`) are encoded once at load and reused for every image — see
   [Fixed-prompt text cache](#fixed-prompt-text-cache).
+- **Optional vision-backbone compile**: `--compile-vision` wraps the ViT trunk in
+  `torch.compile` for ~1.11× vision / ~1.08× segmentation on XPU; eager stays the default —
+  see [Optional vision-backbone `torch.compile`](#optional-vision-backbone-torchcompile).
 - **Coarse-to-fine fallback**: if the full-frame pass finds nothing, vehicles are located with
   the `car` prompt, cropped with margin, upscaled, and re-run; last resort is the bottom half.
 - **Geometry-aware rectification**: contour → quad (`approxPolyDP`, `minAreaRect` fallback) →
@@ -79,7 +82,7 @@ The result is flagged `"valid": false` in the JSON.
 │   └── weights/master/      # sam3.pt checkpoint (gitignored, download separately)
 ├── assets/samples/          # demo images (Wikimedia Commons, see Licensing)
 ├── docs/                    # README figures
-├── scripts/                 # weight download, cache benchmark, XPU profiler
+├── scripts/                 # weight download, cache/compile benchmarks, XPU profiler
 └── tests/                   # pytest unit tests
 ```
 
@@ -221,6 +224,9 @@ python -m lpnrecog -i INPUT [-o OUTPUT] [options]
 | `--no-viz` | off | skip annotated images |
 | `--no-crops` | off | skip rectified crops |
 | `--json` | `<output>/results.json` | results JSON path |
+| `--compile-vision` | off | `torch.compile` the ViT trunk (first run pays compilation) |
+| `--compile-vision-mode` | `default` | `torch.compile` mode (`default` / `reduce-overhead`) |
+| `--compile-vision-target` | `trunk` | what to compile: `trunk` / `vision_backbone` / `forward_image` |
 
 ### results.json format
 
@@ -305,6 +311,54 @@ pass per prompt. Everything after the masks leave the XPU — normalization, mas
 D2H transfer, shape filtering, mask-IoU NMS, rectification — is below 1% each, so further work
 has to target the image encoder or prompt batching; this round changes neither.
 
+#### Optional vision-backbone `torch.compile`
+
+`PlateSegmenter(compile_vision=True)` (CLI `--compile-vision`) wraps the **ViT trunk** in
+`torch.compile(mode="default", dynamic=False, fullgraph=True)`. Eager remains the default and
+the optimization is reversible; weights, resolution (1008²), prompt set and bf16 policy are
+untouched.
+
+Benchmarked with `scripts/benchmark_compile.py --runs 3 --cycles 5` (60 s conditioning, then
+interleaved eager/compiled blocks; medians, `guangdong_plate.jpg`, default 4 prompts):
+
+| | eager | compiled | speedup |
+| --- | ---: | ---: | ---: |
+| ViT / vision forward | 1231 ms | 1088 ms | **1.11×** |
+| full SAM3 segmentation | 2329 ms | 2101 ms | **1.08×** |
+| full pipeline (+rectify+OCR) | 2797 ms | 2646 ms | 1.06× |
+| peak XPU memory | 3.98 GB | 3.98 GB | — |
+| compile + first vision call (cold / warm inductor cache) | — | 34.3 s / 5.6 s | — |
+
+*(latencies: median over blocks; speedups: median of paired per-cycle eager/compiled ratios.)*
+
+Boundaries and modes tested (`--target`, `--mode`): the ViT trunk is the best boundary — the
+whole `vision_backbone` (trunk + fused neck + position encoding) is *slower* compiled
+(~0.93×), and full `forward_image` is on par with the trunk (~1.10× vision). `reduce-overhead`
+measures the same as `default` because cudagraphs are skipped on XPU, and `max-autotune` is
+unstable (see limitations).
+
+Correctness (eager vs compiled): detection count identical on all samples; geely/BYD masks
+bit-exact, guangdong differs on 0.012% of mask pixels (mask IoU 0.9999, boxes ≤ 0.43 px,
+scores ≤ 0.004) because compiled kernels reorder bf16 reductions and the final 0.5 logit
+threshold lands a few pixels differently. OCR strings are identical on all three images
+(guangdong text score: compiled 0.9903 vs eager 0.9806). Compilation is therefore **not
+bit-exact** like the text cache, but detection/mask/OCR semantics are preserved.
+
+Compiler notes (torch 2.14.0+xpu, triton-xpu 3.8.0):
+
+- The vision path captures as a **single Dynamo graph with 0 graph breaks** for all three
+  boundaries (`torch._dynamo.explain`); RoPE, window partition/unpartition, position
+  encodings and `addmm_act` do not introduce breaks.
+- RoPE still hurts: it uses `torch.view_as_complex`/`view_as_real`, which inductor cannot
+  codegen on XPU (warning *"Torchinductor does not support code generation for complex
+  operators"*), so that subgraph falls back to eager and caps the win.
+- `mode="max-autotune"` is unstable on this stack: a Triton matmul config exceeds the
+  per-thread scratch-space limit and the compile subprocess **segfaults**.
+- `mode="reduce-overhead"` skips cudagraphs on XPU (*"skipping cudagraphs due to multiple
+  devices"*), so it offers no advantage over `default`.
+- Compile cost is paid once per process; subsequent runs reuse the inductor disk cache
+  (34 s cold → 5.6 s warm for the trunk).
+
 ### 2. Rectification (`rectify.py`)
 
 - Largest contour of the mask → `approxPolyDP`, falling back to `minAreaRect`.
@@ -358,6 +412,10 @@ python scripts/benchmark_text_cache.py --runs 5
 
 # stage-level XPU profile (single + default prompts) with cached/uncached verification
 python scripts/profile_xpu_pipeline.py --runs 5
+
+# eager vs torch.compile: interleaved latency + equivalence (vision/detections/OCR)
+python scripts/benchmark_compile.py --runs 3 --cycles 5
+python scripts/benchmark_compile.py --verify-only assets/samples/*.jpg
 ```
 
 ## Known limitations
@@ -368,6 +426,9 @@ python scripts/profile_xpu_pipeline.py --runs 5
   and green new-energy plates would need another branch.
 - PaddleOCR runs on CPU here; the XPU is used for SAM 3 only.
 - No batch inference yet: images are processed one by one (model and OCR are loaded once).
+- `--compile-vision` reorders bf16 reductions in the compiled kernels, so it is only
+  equivalence-level accurate (masks/OCR stable, not bit-exact); the default eager path is
+  bit-exact. `max-autotune` is currently unusable on XPU (Triton scratch-space OOM → segfault).
 
 ## License and attribution
 
