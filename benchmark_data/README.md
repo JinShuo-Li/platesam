@@ -34,3 +34,19 @@ See `sources.csv` for the source and original filename of each image.
 ## Usage
 
 This benchmark is frozen. When evaluating different models or pipeline versions, keep the images and ground truth unchanged. Do not replace a test image because a model fails to recognize it.
+
+## Annotations
+
+`ground_truth.csv` contains these fields:
+
+- `image`, `plate`, `category`, `plate_type`, `province`, `prefix`
+- `label_source`, `verified`, `notes`
+
+All 50 images have a complete plate-string annotation. Not every source provides a reliable bounding-box annotation, so do not assume that all 50 images have bounding boxes. The plate strings in `ground_truth.csv` are the official Ground Truth for evaluation.
+
+## Version
+
+Benchmark version: v1.0  
+Status: Frozen
+
+The 50 images and Ground Truth in v1.0 are frozen. Do not replace images or modify the Ground Truth because a model fails to recognize a sample. If the benchmark is expanded in the future, create a new version such as v2.0 instead of silently changing v1.0.
