@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from .device import get_device
-from .ocr import is_valid_plate
+from .ocr import GPUPlateOCR, PlateOCR, is_valid_plate
 from .pipeline import PlateRecognitionPipeline
 from .segmenter import DEFAULT_PROMPTS, PlateSegmenter
 from .viz import draw_results
@@ -44,6 +44,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--conf", type=float, default=0.4, help="detection score threshold")
     parser.add_argument("--device", default=None, help="xpu / cuda / cpu (default: auto)")
+    parser.add_argument(
+        "--ocr-device",
+        choices=("cpu", "cuda", "auto"),
+        default="cpu",
+        help="OCR device (default: cpu; auto tries CUDA then falls back to CPU)",
+    )
+    parser.add_argument(
+        "--ocr-python",
+        default=None,
+        help="Python executable for the CUDA OCR worker "
+        "(default: .venv-ocr-cuda/bin/python)",
+    )
     parser.add_argument("--checkpoint", default=None, help="SAM3 checkpoint path")
     parser.add_argument("--plate-size", default="440x140", help="rectified WxH, default 440x140")
     parser.add_argument("--no-viz", action="store_true", help="skip visualization output")
@@ -74,6 +86,30 @@ def _parse_size(text: str) -> tuple[int, int]:
         raise argparse.ArgumentTypeError(f"invalid size {text!r}, expected WxH") from exc
 
 
+def _build_ocr(
+    requested_device: str, python_executable: Optional[str]
+) -> tuple[PlateOCR, str]:
+    if requested_device == "cpu":
+        return PlateOCR(), "cpu"
+
+    gpu_ocr = GPUPlateOCR(
+        python_executable=Path(python_executable) if python_executable else None
+    )
+    try:
+        # Start eagerly so an explicit --ocr-device cuda fails before SAM3 loads.
+        gpu_ocr.load()
+        return gpu_ocr, "cuda"
+    except Exception as exc:
+        gpu_ocr.close()
+        if requested_device == "auto":
+            print(
+                f"warning: CUDA OCR unavailable ({exc}); falling back to CPU",
+                file=sys.stderr,
+            )
+            return PlateOCR(), "cpu"
+        raise RuntimeError(f"failed to start CUDA OCR: {exc}") from exc
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     input_path = Path(args.input)
@@ -94,73 +130,97 @@ def main(argv: Optional[List[str]] = None) -> int:
         (output_dir / "crops").mkdir(exist_ok=True)
 
     device = get_device(args.device)
-    print(f"device={device} images={len(images)} prompts={args.prompt or list(DEFAULT_PROMPTS)}")
+    try:
+        ocr, resolved_ocr_device = _build_ocr(args.ocr_device, args.ocr_python)
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
-    segmenter = PlateSegmenter(
-        checkpoint=args.checkpoint,
-        device=device,
-        prompts=tuple(args.prompt) if args.prompt else DEFAULT_PROMPTS,
-        confidence_threshold=args.conf,
-        compile_vision=args.compile_vision,
-        compile_vision_mode=args.compile_vision_mode,
-        compile_vision_target=args.compile_vision_target,
-    )
-    pipeline = PlateRecognitionPipeline(
-        segmenter=segmenter, out_size=_parse_size(args.plate_size)
-    )
+    try:
+        print(
+            f"device={device} ocr_device={resolved_ocr_device} "
+            f"images={len(images)} prompts={args.prompt or list(DEFAULT_PROMPTS)}"
+        )
+        segmenter = PlateSegmenter(
+            checkpoint=args.checkpoint,
+            device=device,
+            prompts=tuple(args.prompt) if args.prompt else DEFAULT_PROMPTS,
+            confidence_threshold=args.conf,
+            compile_vision=args.compile_vision,
+            compile_vision_mode=args.compile_vision_mode,
+            compile_vision_target=args.compile_vision_target,
+        )
+        pipeline = PlateRecognitionPipeline(
+            segmenter=segmenter,
+            ocr=ocr,
+            out_size=_parse_size(args.plate_size),
+        )
 
-    all_results = []
-    for image_path in images:
-        t0 = time.time()
-        results = pipeline.run_path(image_path)
-        elapsed = time.time() - t0
-        entry = {
-            "image": str(image_path),
-            "elapsed_s": round(elapsed, 2),
-            "plates": [
-                {
-                    "box": [round(float(v), 1) for v in r.detection.box],
-                    "det_score": round(r.score, 4),
-                    "prompt": r.detection.prompt,
-                    "text": r.text,
-                    "text_score": round(r.text_score, 4),
-                    "valid": is_valid_plate(r.text),
-                }
-                for r in results
-            ],
-        }
-        all_results.append(entry)
+        all_results = []
+        for image_path in images:
+            t0 = time.time()
+            results = pipeline.run_path(image_path)
+            elapsed = time.time() - t0
+            entry = {
+                "image": str(image_path),
+                "elapsed_s": round(elapsed, 2),
+                "plates": [
+                    {
+                        "box": [round(float(v), 1) for v in r.detection.box],
+                        "det_score": round(r.score, 4),
+                        "prompt": r.detection.prompt,
+                        "text": r.text,
+                        "text_score": round(r.text_score, 4),
+                        "valid": is_valid_plate(r.text),
+                    }
+                    for r in results
+                ],
+            }
+            all_results.append(entry)
 
-        def _fmt(r) -> str:
-            marker = "" if is_valid_plate(r.text) else ",invalid"
-            return f"{r.text or '?'}({r.text_score:.2f}{marker})"
+            def _fmt(r) -> str:
+                marker = "" if is_valid_plate(r.text) else ",invalid"
+                return f"{r.text or '?'}({r.text_score:.2f}{marker})"
 
-        summary = ", ".join(_fmt(r) for r in results) or "none"
-        print(f"{image_path.name}: {len(results)} plate(s) in {elapsed:.1f}s -> {summary}")
+            summary = ", ".join(_fmt(r) for r in results) or "none"
+            print(
+                f"{image_path.name}: {len(results)} plate(s) "
+                f"in {elapsed:.1f}s -> {summary}"
+            )
 
-        if not args.no_viz or not args.no_crops:
-            image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-            if image_bgr is None:
-                continue
-            if not args.no_viz:
-                canvas = draw_results(image_bgr, results)
-                cv2.imwrite(str(output_dir / "viz" / f"{image_path.stem}_viz.jpg"), canvas)
-            if not args.no_crops:
-                for idx, res in enumerate(results):
-                    if res.crop is None:
-                        continue
+            if not args.no_viz or not args.no_crops:
+                image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+                if image_bgr is None:
+                    continue
+                if not args.no_viz:
+                    canvas = draw_results(image_bgr, results)
                     cv2.imwrite(
-                        str(output_dir / "crops" / f"{image_path.stem}_plate{idx}.jpg"),
-                        res.crop,
+                        str(output_dir / "viz" / f"{image_path.stem}_viz.jpg"),
+                        canvas,
                     )
+                if not args.no_crops:
+                    for idx, res in enumerate(results):
+                        if res.crop is None:
+                            continue
+                        cv2.imwrite(
+                            str(
+                                output_dir
+                                / "crops"
+                                / f"{image_path.stem}_plate{idx}.jpg"
+                            ),
+                            res.crop,
+                        )
 
-    json_path = Path(args.json) if args.json else output_dir / "results.json"
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(all_results, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(f"results written to {json_path}")
-    return 0
+        json_path = Path(args.json) if args.json else output_dir / "results.json"
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(all_results, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"results written to {json_path}")
+        return 0
+    finally:
+        if isinstance(ocr, GPUPlateOCR):
+            ocr.close()
 
 
 if __name__ == "__main__":

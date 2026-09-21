@@ -3,7 +3,7 @@
 **License plate recognition** — SAM 3 text-prompt segmentation → perspective rectification
 to the plate's real shape → PaddleOCR.
 
-Built as a course project, validated end-to-end on an **Intel XPU** laptop (WSL2, no CUDA).
+Built as a course project, validated end-to-end on both **NVIDIA CUDA** and **Intel XPU** under WSL2; CUDA is preferred when available.
 
 ```text
              ┌──────────────────────────────┐
@@ -45,8 +45,8 @@ The result is flagged `"valid": false` in the JSON.
 
 ## Features
 
-- **XPU first**: runs natively on Intel XPU (`torch 2.14.0+xpu`), no CUDA required; falls back
-  to CUDA/CPU automatically. Includes a documented set of upstream patches (see below).
+- **CUDA first**: CUDA and Intel XPU are both supported; device auto-selection prefers CUDA,
+  then falls back to XPU or CPU. Includes a documented set of upstream patches (see below).
 - **Open-vocabulary segmentation**: no plate detector to train — SAM 3 finds plates from
   text prompts alone.
 - **Multi-prompt merge**: several English prompt candidates are run and merged by mask IoU
@@ -118,6 +118,9 @@ pip install "numpy<2" opencv-python-headless pillow \
             paddlepaddle paddleocr \
             einops pycocotools psutil pytest
 ```
+
+For isolated CUDA OCR, create the dedicated worker environment with
+`bash scripts/setup_ocr_cuda_env.sh`.
 
 > **Note:** `paddleocr` pulls `opencv-contrib-python`; keep `numpy<2` (SAM 3 requires it).
 > If `import sam3` fails with `ModuleNotFoundError: pkg_resources`, you are running the
@@ -200,7 +203,7 @@ Python API:
 from lpnrecog import PlateRecognitionPipeline
 from lpnrecog.ocr import is_valid_plate
 
-pipe = PlateRecognitionPipeline()          # device auto: xpu > cuda > cpu
+pipe = PlateRecognitionPipeline()          # device auto: cuda > xpu > cpu
 for res in pipe.run("assets/samples/geely_kingkong.jpg"):
     print(res.text, res.text_score, res.box, is_valid_plate(res.text))
     # 贵HEE253 0.9691 (169.0, 524.2, 278.7, 585.5) True
@@ -219,6 +222,8 @@ python -m lpnrecog -i INPUT [-o OUTPUT] [options]
 | `--prompt` | `license plate`, `number plate`, `vehicle registration plate`, `car plate` | SAM3 text prompt; repeatable |
 | `--conf` | `0.4` | detection score threshold |
 | `--device` | auto | `xpu` / `cuda` / `cpu` |
+| `--ocr-device` | `cpu` | `cpu` / `cuda` / `auto` (CUDA uses the isolated OCR worker) |
+| `--ocr-python` | `.venv-ocr-cuda/bin/python` | Python executable for the CUDA OCR worker |
 | `--checkpoint` | `vendor/sam3/weights/master/sam3.pt` | SAM3 checkpoint path |
 | `--plate-size` | `440x140` | rectified crop size `WxH` |
 | `--no-viz` | off | skip annotated images |
@@ -421,7 +426,7 @@ python scripts/evaluate_benchmark.py --compare       # + eager/compiled agreemen
 
 | File | Change |
 | --- | --- |
-| `sam3/model_builder.py` | `importlib.resources` replaces the removed `pkg_resources`; new `_best_device()` (xpu > cuda > cpu); `_setup_device_and_mode` accepts any device |
+| `sam3/model_builder.py` | `importlib.resources` replaces the removed `pkg_resources`; new `_best_device()` (cuda > xpu > cpu); `_setup_device_and_mode` accepts any device |
 | `sam3/model/decoder.py` | removed hardcoded `device="cuda"` coordinate precompute at init; coords are built lazily on the input device |
 | `sam3/model/position_encoding.py` | precomputed position-encoding cache is built on CPU and moved to the input device on forward |
 | `sam3/perflib/fused.py` | `addmm_act` follows the input dtype instead of hardcoding bf16 (identical under bf16 autocast) |
