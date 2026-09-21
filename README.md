@@ -64,6 +64,8 @@ The result is flagged `"valid": false` in the JSON.
   for vertical detections and a small inset to drop plate frames.
 - **OCR post-processing**: full-width → half-width, common confusions (`I`→`1`, `O`→`0`),
   and Chinese plate-format validation (standard 7-char and new-energy 8-char patterns).
+- **Optional CUDA OCR**: PaddleOCR can run in an isolated GPU worker, avoiding CUDA library
+  conflicts with the main PyTorch environment.
 - **Usable outputs**: per-image JSON, annotated visualization with CJK labels, and rectified crops.
 
 ## Repository layout
@@ -94,8 +96,8 @@ The result is flagged `"valid": false` in the JSON.
 | Hardware | Intel XPU (iGPU/dGPU with Level Zero); CUDA GPU or CPU also work |
 | Python | 3.10–3.12 (tested on 3.12) |
 | PyTorch | 2.14.0+xpu + torchvision 0.29.0+xpu (CUDA/CPU builds also fine) |
-| Paddle | paddlepaddle 3.3.1 + paddleocr 3.7.0 (CPU) |
-| Disk | ~10 GB (3.4 GB checkpoint + models + env) |
+| Paddle | paddlepaddle 3.3.1 + paddleocr 3.7.0 (CPU default); isolated paddlepaddle-gpu 3.3.1 optional |
+| Disk | ~10 GB base; CUDA OCR environment adds ~6 GB |
 | Memory | ≥8 GB RAM; XPU inference peaks at ~4 GB |
 
 ## Installation
@@ -119,12 +121,27 @@ pip install "numpy<2" opencv-python-headless pillow \
             einops pycocotools psutil pytest
 ```
 
-For isolated CUDA OCR, create the dedicated worker environment with
-`bash scripts/setup_ocr_cuda_env.sh`.
-
 > **Note:** `paddleocr` pulls `opencv-contrib-python`; keep `numpy<2` (SAM 3 requires it).
 > If `import sam3` fails with `ModuleNotFoundError: pkg_resources`, you are running the
 > unpatched upstream code — this repo already replaced it with `importlib.resources`.
+
+### Optional CUDA OCR
+
+PyTorch and Paddle GPU require different CUDA library versions, so CUDA OCR runs in a
+separate worker environment. Create it from the repository root:
+
+```bash
+bash scripts/setup_ocr_cuda_env.sh       # creates .venv-ocr-cuda
+```
+
+Enable it with `--ocr-device cuda`; use `auto` to fall back to CPU if the worker is unavailable:
+
+```bash
+python -m lpnrecog -i assets/samples --device cuda --ocr-device cuda
+```
+
+For an environment at another location, pass its interpreter with
+`--ocr-python /path/to/venv/bin/python`.
 
 ## Model weights
 

@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python
 """Evaluate the plate pipeline on the frozen ``benchmark_data`` set.
 
@@ -30,7 +31,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from lpnrecog.device import get_device
-from lpnrecog.ocr import is_valid_plate, normalize_plate_text
+from lpnrecog.ocr import GPUPlateOCR, PlateOCR, is_valid_plate, normalize_plate_text
 from lpnrecog.pipeline import PlateRecognitionPipeline
 from lpnrecog.segmenter import DEFAULT_PROMPTS, PlateSegmenter
 
@@ -49,8 +50,26 @@ _FIELDS = (
     "exact",
     "char_acc",
     "elapsed_s",
+    "ocr_elapsed_s",
     "mask_sha256",
 )
+
+
+class _TimedOCR:
+    def __init__(self, backend: PlateOCR) -> None:
+        self.backend = backend
+        self.elapsed_s = 0.0
+
+    def recognize_plate(self, *args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return self.backend.recognize_plate(*args, **kwargs)
+        finally:
+            self.elapsed_s += time.perf_counter() - started
+
+    def close(self) -> None:
+        if isinstance(self.backend, GPUPlateOCR):
+            self.backend.close()
 
 
 def _normalize(text: str) -> str:
@@ -82,9 +101,11 @@ def _run(pipe: PlateRecognitionPipeline, data_dir: Path, rows: Sequence[Dict[str
     records: List[Dict[str, object]] = []
     for i, row in enumerate(rows, 1):
         image = data_dir / "images" / row["image"]
+        ocr_started_at = pipe.ocr.elapsed_s
         t0 = time.perf_counter()
         results = pipe.run(image)
         elapsed = time.perf_counter() - t0
+        ocr_elapsed = pipe.ocr.elapsed_s - ocr_started_at
         gt = _normalize(row["plate"])
         top = results[0] if results else None
         pred = _normalize(top.text) if top else ""
@@ -104,6 +125,7 @@ def _run(pipe: PlateRecognitionPipeline, data_dir: Path, rows: Sequence[Dict[str
             "any_exact": gt in texts,
             "char_acc": _char_accuracy(gt, pred) if pred else 0.0,
             "elapsed_s": round(elapsed, 3),
+            "ocr_elapsed_s": round(ocr_elapsed, 4),
             "mask_sha256": (
                 hashlib.sha256(top.detection.mask.tobytes()).hexdigest() if top else ""
             ),
@@ -141,6 +163,7 @@ def _summary(records: Sequence[Dict[str, object]]) -> Dict[str, object]:
         stats["exact"] += int(r["exact"])
 
     elapsed = [r["elapsed_s"] for r in records]
+    ocr_elapsed = [r["ocr_elapsed_s"] for r in records]
     return {
         "images": n,
         "detected": rate(detected),
@@ -150,6 +173,8 @@ def _summary(records: Sequence[Dict[str, object]]) -> Dict[str, object]:
         "mean_char_acc": statistics.mean(r["char_acc"] for r in records),
         "median_latency_s": statistics.median(elapsed),
         "total_latency_s": sum(elapsed),
+        "median_ocr_latency_s": statistics.median(ocr_elapsed),
+        "total_ocr_latency_s": sum(ocr_elapsed),
         "by_category": by_category,
         "by_plate_type": by_type,
     }
@@ -166,6 +191,10 @@ def _print_summary(summary: Dict[str, object], records: Sequence[Dict[str, objec
     print(
         f"latency           : median {summary['median_latency_s']:.2f}s, "
         f"total {summary['total_latency_s']:.1f}s"
+    )
+    print(
+        f"OCR latency       : median {summary['median_ocr_latency_s']:.3f}s, "
+        f"total {summary['total_ocr_latency_s']:.1f}s"
     )
     for label, key in (("by category", "by_category"), ("by plate type", "by_plate_type")):
         print(f"{label}:")
@@ -287,6 +316,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--data-dir", type=Path, default=_DEFAULT_DATA)
     parser.add_argument("--output", type=Path, default=_REPO_ROOT / "outputs" / "benchmark_eval")
     parser.add_argument("--device", default=None, help="xpu / cuda / cpu (default: auto)")
+    parser.add_argument(
+        "--ocr-device",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help="OCR device (default: cpu)",
+    )
+    parser.add_argument(
+        "--ocr-python",
+        type=Path,
+        default=None,
+        help="Python executable for the CUDA OCR worker",
+    )
     parser.add_argument("--checkpoint", default=None, help="SAM3 checkpoint path")
     parser.add_argument("--limit", type=int, default=None, help="only the first N images")
     parser.add_argument(
@@ -311,7 +352,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     device = get_device(args.device)
     print(
-        f"device={device} images={len(rows)} "
+        f"device={device} ocr_device={args.ocr_device} images={len(rows)} "
         f"prompts={list(DEFAULT_PROMPTS)} compile_vision={args.compile_vision} "
         f"compare={args.compare}"
     )
@@ -322,31 +363,40 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         prompts=DEFAULT_PROMPTS,
         compile_vision=args.compile_vision,
     )
-    pipeline = PlateRecognitionPipeline(segmenter=segmenter)
+    ocr_backend = (
+        GPUPlateOCR(python_executable=args.ocr_python)
+        if args.ocr_device == "cuda"
+        else PlateOCR()
+    )
+    timed_ocr = _TimedOCR(ocr_backend)
+    pipeline = PlateRecognitionPipeline(segmenter=segmenter, ocr=timed_ocr)
 
-    eager_records = None
-    if args.compare:
-        eager_records = _run(pipeline, data_dir, rows)
-        eager_summary = _summary(eager_records)
-        _print_summary(eager_summary, eager_records)
-        _write_outputs(args.output, eager_records, eager_summary, "eager")
+    try:
+        eager_records = None
+        if args.compare:
+            eager_records = _run(pipeline, data_dir, rows)
+            eager_summary = _summary(eager_records)
+            _print_summary(eager_summary, eager_records)
+            _write_outputs(args.output, eager_records, eager_summary, "eager")
 
-        target, original = _compile_in_place(segmenter)
-        print("\n-- compiled run (first image pays compilation) --")
-        compiled_records = _run(pipeline, data_dir, rows)
-        setattr(target, "forward", original)
-        compiled_summary = _summary(compiled_records)
-        _print_summary(compiled_summary, compiled_records)
-        _write_outputs(args.output, compiled_records, compiled_summary, "compiled")
-        _compare(eager_records, compiled_records, args.output)
+            target, original = _compile_in_place(segmenter)
+            print("\n-- compiled run (first image pays compilation) --")
+            compiled_records = _run(pipeline, data_dir, rows)
+            setattr(target, "forward", original)
+            compiled_summary = _summary(compiled_records)
+            _print_summary(compiled_summary, compiled_records)
+            _write_outputs(args.output, compiled_records, compiled_summary, "compiled")
+            _compare(eager_records, compiled_records, args.output)
+            return 0
+
+        records = _run(pipeline, data_dir, rows)
+        summary = _summary(records)
+        _print_summary(summary, records)
+        tag = "compiled" if args.compile_vision else "eager"
+        _write_outputs(args.output, records, summary, tag)
         return 0
-
-    records = _run(pipeline, data_dir, rows)
-    summary = _summary(records)
-    _print_summary(summary, records)
-    tag = "compiled" if args.compile_vision else "eager"
-    _write_outputs(args.output, records, summary, tag)
-    return 0
+    finally:
+        timed_ocr.close()
 
 
 if __name__ == "__main__":
