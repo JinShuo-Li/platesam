@@ -1,4 +1,4 @@
-"""Device selection and autocast helpers (XPU > CUDA > CPU)."""
+"""Device selection and autocast helpers (CUDA > XPU > CPU)."""
 
 from __future__ import annotations
 

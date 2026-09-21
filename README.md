@@ -3,7 +3,7 @@
 **License plate recognition** — SAM 3 text-prompt segmentation → perspective rectification
 to the plate's real shape → PaddleOCR.
 
-Built as a course project, validated end-to-end on an **Intel XPU** laptop (WSL2, no CUDA).
+Built as a course project, validated end-to-end on both **NVIDIA CUDA** and **Intel XPU** under WSL2; CUDA is preferred when available.
 
 ```text
              ┌──────────────────────────────┐
@@ -45,8 +45,8 @@ The result is flagged `"valid": false` in the JSON.
 
 ## Features
 
-- **XPU first**: runs natively on Intel XPU (`torch 2.14.0+xpu`), no CUDA required; falls back
-  to CUDA/CPU automatically. Includes a documented set of upstream patches (see below).
+- **CUDA first**: CUDA and Intel XPU are both supported; device auto-selection prefers CUDA,
+  then falls back to XPU or CPU. Includes a documented set of upstream patches (see below).
 - **Open-vocabulary segmentation**: no plate detector to train — SAM 3 finds plates from
   text prompts alone.
 - **Multi-prompt merge**: several English prompt candidates are run and merged by mask IoU
@@ -64,6 +64,8 @@ The result is flagged `"valid": false` in the JSON.
   for vertical detections and a small inset to drop plate frames.
 - **OCR post-processing**: full-width → half-width, common confusions (`I`→`1`, `O`→`0`),
   and Chinese plate-format validation (standard 7-char and new-energy 8-char patterns).
+- **Optional CUDA OCR**: PaddleOCR can run in an isolated GPU worker, avoiding CUDA library
+  conflicts with the main PyTorch environment.
 - **Usable outputs**: per-image JSON, annotated visualization with CJK labels, and rectified crops.
 
 ## Repository layout
@@ -94,8 +96,8 @@ The result is flagged `"valid": false` in the JSON.
 | Hardware | Intel XPU (iGPU/dGPU with Level Zero); CUDA GPU or CPU also work |
 | Python | 3.10–3.12 (tested on 3.12) |
 | PyTorch | 2.14.0+xpu + torchvision 0.29.0+xpu (CUDA/CPU builds also fine) |
-| Paddle | paddlepaddle 3.3.1 + paddleocr 3.7.0 (CPU) |
-| Disk | ~10 GB (3.4 GB checkpoint + models + env) |
+| Paddle | paddlepaddle 3.3.1 + paddleocr 3.7.0 (CPU default); isolated paddlepaddle-gpu 3.3.1 optional |
+| Disk | ~10 GB base; CUDA OCR environment adds ~6 GB |
 | Memory | ≥8 GB RAM; XPU inference peaks at ~4 GB |
 
 ## Installation
@@ -122,6 +124,24 @@ pip install "numpy<2" opencv-python-headless pillow \
 > **Note:** `paddleocr` pulls `opencv-contrib-python`; keep `numpy<2` (SAM 3 requires it).
 > If `import sam3` fails with `ModuleNotFoundError: pkg_resources`, you are running the
 > unpatched upstream code — this repo already replaced it with `importlib.resources`.
+
+### Optional CUDA OCR
+
+PyTorch and Paddle GPU require different CUDA library versions, so CUDA OCR runs in a
+separate worker environment. Create it from the repository root:
+
+```bash
+bash scripts/setup_ocr_cuda_env.sh       # creates .venv-ocr-cuda
+```
+
+Enable it with `--ocr-device cuda`; use `auto` to fall back to CPU if the worker is unavailable:
+
+```bash
+python -m lpnrecog -i assets/samples --device cuda --ocr-device cuda
+```
+
+For an environment at another location, pass its interpreter with
+`--ocr-python /path/to/venv/bin/python`.
 
 ## Model weights
 
@@ -200,7 +220,7 @@ Python API:
 from lpnrecog import PlateRecognitionPipeline
 from lpnrecog.ocr import is_valid_plate
 
-pipe = PlateRecognitionPipeline()          # device auto: xpu > cuda > cpu
+pipe = PlateRecognitionPipeline()          # device auto: cuda > xpu > cpu
 for res in pipe.run("assets/samples/geely_kingkong.jpg"):
     print(res.text, res.text_score, res.box, is_valid_plate(res.text))
     # 贵HEE253 0.9691 (169.0, 524.2, 278.7, 585.5) True
@@ -219,6 +239,8 @@ python -m lpnrecog -i INPUT [-o OUTPUT] [options]
 | `--prompt` | `license plate`, `number plate`, `vehicle registration plate`, `car plate` | SAM3 text prompt; repeatable |
 | `--conf` | `0.4` | detection score threshold |
 | `--device` | auto | `xpu` / `cuda` / `cpu` |
+| `--ocr-device` | `cpu` | `cpu` / `cuda` / `auto` (CUDA uses the isolated OCR worker) |
+| `--ocr-python` | `.venv-ocr-cuda/bin/python` | Python executable for the CUDA OCR worker |
 | `--checkpoint` | `vendor/sam3/weights/master/sam3.pt` | SAM3 checkpoint path |
 | `--plate-size` | `440x140` | rectified crop size `WxH` |
 | `--no-viz` | off | skip annotated images |
@@ -421,7 +443,7 @@ python scripts/evaluate_benchmark.py --compare       # + eager/compiled agreemen
 
 | File | Change |
 | --- | --- |
-| `sam3/model_builder.py` | `importlib.resources` replaces the removed `pkg_resources`; new `_best_device()` (xpu > cuda > cpu); `_setup_device_and_mode` accepts any device |
+| `sam3/model_builder.py` | `importlib.resources` replaces the removed `pkg_resources`; new `_best_device()` (cuda > xpu > cpu); `_setup_device_and_mode` accepts any device |
 | `sam3/model/decoder.py` | removed hardcoded `device="cuda"` coordinate precompute at init; coords are built lazily on the input device |
 | `sam3/model/position_encoding.py` | precomputed position-encoding cache is built on CPU and moved to the input device on forward |
 | `sam3/perflib/fused.py` | `addmm_act` follows the input dtype instead of hardcoding bf16 (identical under bf16 autocast) |
